@@ -11,16 +11,6 @@ interface AuthContextType {
   logout: () => void;
 }
 
-const DEFAULT_ADMIN_USER: UserSession = {
-  email: 'admin-damoneward38@gmail.com',
-  name: 'Director Damone Ward',
-  role: 'director_admin',
-  clearance: 'LEVEL_V_SOVEREIGN',
-  phone: '443-210-6995',
-  ipOwnership: '100% PERMANENT & IRREVOCABLE',
-  token: 'shaar_sovereign_token_334_damone',
-};
-
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -33,8 +23,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e) {
       console.warn('Could not parse saved session', e);
     }
-    // Default to logged-in admin as requested by user
-    return DEFAULT_ADMIN_USER;
+    return null;
   });
 
   useEffect(() => {
@@ -55,7 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const loginAsAdmin = async () => {
-    await login('admin-damoneward38@gmail.com', '313damone');
+    throw new Error('Quick administrator sign-in is disabled. Use deployment-configured credentials.');
   };
 
   const logout = () => {

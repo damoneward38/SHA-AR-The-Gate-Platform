@@ -1,3 +1,11 @@
+const savedAuthHeaders = (): Record<string, string> => {
+  try {
+    const saved = localStorage.getItem('shaar_auth_session');
+    const user = saved ? JSON.parse(saved) : null;
+    return user?.token ? { Authorization: 'Bearer ' + user.token } : {};
+  } catch { return {}; }
+};
+
 import { OrderRecord, PipelineAuditReport, UserSession } from '../types';
 
 export const api = {
@@ -18,24 +26,8 @@ export const api = {
         body: JSON.stringify({ email, password }),
       });
       return await res.json();
-    } catch (err) {
-      // Fallback for resilient client-side execution if network interrupted
-      if (email === 'admin-damoneward38@gmail.com' && password === '313damone') {
-        return {
-          success: true,
-          message: 'Director Damone Ward logged in (Client Cache)',
-          user: {
-            email: 'admin-damoneward38@gmail.com',
-            name: 'Director Damone Ward',
-            role: 'director_admin',
-            clearance: 'LEVEL_V_SOVEREIGN',
-            phone: '443-210-6995',
-            ipOwnership: '100% PERMANENT & IRREVOCABLE',
-            token: 'shaar_sovereign_token_334_damone',
-          },
-        };
-      }
-      return { success: false, message: 'Server communication failed.' };
+    } catch {
+      return { success: false, message: 'Server communication failed. No local authentication fallback is available.' };
     }
   },
 
@@ -46,24 +38,13 @@ export const api = {
       });
       return await res.json();
     } catch {
-      return {
-        authenticated: true,
-        user: {
-          email: 'admin-damoneward38@gmail.com',
-          name: 'Director Damone Ward',
-          role: 'director_admin',
-          clearance: 'LEVEL_V_SOVEREIGN',
-          phone: '443-210-6995',
-          ipOwnership: '100% PERMANENT & IRREVOCABLE',
-          token: 'shaar_sovereign_token_334_damone',
-        },
-      };
+      return { authenticated: false };
     }
   },
 
   async getOrders(): Promise<{ success: boolean; count: number; orders: OrderRecord[] }> {
     try {
-      const res = await fetch('/api/orders');
+      const res = await fetch('/api/orders', { headers: savedAuthHeaders() });
       return await res.json();
     } catch {
       return { success: true, count: 0, orders: [] };
@@ -78,53 +59,22 @@ export const api = {
         body: JSON.stringify(orderData),
       });
       return await res.json();
-    } catch (err) {
-      // Robust client fallback
-      const orderNum = Math.floor(1000 + Math.random() * 9000);
-      return {
-        success: true,
-        message: 'Order processed successfully (Sovereign Buffer)',
-        order: {
-          id: `ORD-SHAAR-33-${orderNum}`,
-          timestamp: new Date().toISOString(),
-          customerEmail: orderData.customerEmail || 'admin-damoneward38@gmail.com',
-          customerName: orderData.customerName || 'Damone Ward',
-          organization: orderData.organization || 'Sovereign Field Operations',
-          planId: orderData.planId || 'custom',
-          planName: orderData.planName || 'White Label License',
-          amount: orderData.amount || 49997,
-          currency: 'USD',
-          status: 'CONFIRMED' as const,
-          licenseKey: `SHAAR-LIC-${Math.random().toString(36).substring(2, 8).toUpperCase()}-33N`,
-          paymentMethod: orderData.paymentMethod || 'Wire Transfer',
-        },
-      };
+    } catch {
+      return { success: false, message: 'Checkout service unavailable. No order or license was created.' };
     }
   },
 
   async runPipelineAudit(): Promise<PipelineAuditReport> {
     try {
-      const res = await fetch('/api/pipeline/audit');
+      const res = await fetch('/api/pipeline/audit', { headers: savedAuthHeaders() });
       return await res.json();
     } catch {
       return {
         timestamp: new Date().toISOString(),
-        status: 'ALL_SYSTEMS_OPERATIONAL',
-        score: '100%',
-        directorAudit: {
-          owner: 'Damone Ward',
-          phone: '443-210-6995',
-          email: 'admin-damoneward38@gmail.com',
-          ipStatus: 'VERIFIED_100_PERCENT_EXCLUSIVE',
-          credentialsVerified: true,
-        },
-        subsystems: [
-          { name: 'Express Backend Core', route: '/api/*', status: 'PASSED', latencyMs: 2 },
-          { name: 'Vite React Router Pipeline', status: 'PASSED', latencyMs: 1 },
-          { name: '33rd Parallel Coordinate Engine', accuracy: '0.0001°', status: 'PASSED', latencyMs: 3 },
-          { name: 'Web Audio Frequency Synthesizer', status: 'PASSED', latencyMs: 2 },
-          { name: 'Checkout & License Provisioning', status: 'PASSED', latencyMs: 4 },
-        ],
+        status: 'UNAVAILABLE',
+        score: 'NOT_VERIFIED',
+        directorAudit: { owner: '', phone: '', email: '', ipStatus: 'NOT_VERIFIED', credentialsVerified: false },
+        subsystems: [],
       };
     }
   },

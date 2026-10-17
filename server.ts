@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,14 +22,35 @@ interface UserSession {
   token: string;
 }
 
-const ADMIN_USER: UserSession = {
-  email: 'admin-damoneward38@gmail.com',
-  name: 'Director Damone Ward',
-  role: 'director_admin',
-  clearance: 'LEVEL_V_SOVEREIGN',
-  phone: '443-210-6995',
-  ipOwnership: '100% PERMANENT & IRREVOCABLE',
-  token: 'shaar_sovereign_token_334_damone',
+const getAdminEmail = () => (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+const getAuthSecret = () => process.env.AUTH_TOKEN_SECRET || '';
+const issueAdminToken = (email: string) => {
+  const secret = getAuthSecret();
+  if (secret.length < 32) throw new Error('AUTH_TOKEN_SECRET must be at least 32 characters');
+  const payload = Buffer.from(JSON.stringify({ email, role: 'director_admin', exp: Math.floor(Date.now() / 1000) + 28800 })).toString('base64url');
+  return payload + '.' + createHmac('sha256', secret).update(payload).digest('base64url');
+};
+const readAdminToken = (token: string): any => {
+  const secret = getAuthSecret();
+  if (secret.length < 32 || !token || token.length > 4096) return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const expected = createHmac('sha256', secret).update(parts[0]).digest();
+  let actual: Buffer;
+  try { actual = Buffer.from(parts[1], 'base64url'); } catch { return null; }
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    if (data.role !== 'director_admin' || String(data.email).toLowerCase() !== getAdminEmail() || !Number.isFinite(data.exp) || data.exp <= Math.floor(Date.now() / 1000)) return null;
+    return data;
+  } catch { return null; }
+};
+const requireAdmin = (req: Request, res: Response, next: import('express').NextFunction) => {
+  const header = req.headers.authorization || '';
+  const admin = header.startsWith('Bearer ') ? readAdminToken(header.slice(7)) : null;
+  if (!admin) return res.status(401).json({ success: false, error: 'Valid administrator session required' });
+  (req as any).adminUser = admin;
+  return next();
 };
 
 // Seed sample orders
@@ -93,114 +115,35 @@ app.get('/api/health', (_req: Request, res: Response) => {
 });
 
 app.post('/api/auth/login', (req: Request, res: Response) => {
-  const { email, password } = req.body;
-
-  // Check admin credentials
-  if (email === 'admin-damoneward38@gmail.com' && password === '313damone') {
-    return res.json({
-      success: true,
-      message: 'Director Damone Ward authenticated with Level-V Sovereign Clearance.',
-      user: ADMIN_USER,
-      token: ADMIN_USER.token,
-    });
-  }
-
-  // Allow standard user login/demo access
-  if (email && password) {
-    const isDirector = email.toLowerCase().includes('damoneward38');
-    const user: UserSession = {
-      email,
-      name: isDirector ? 'Director Damone Ward' : email.split('@')[0],
-      role: isDirector ? 'director_admin' : 'field_operator',
-      clearance: isDirector ? 'LEVEL_V_SOVEREIGN' : 'LEVEL_II_RESEARCHER',
-      phone: isDirector ? '443-210-6995' : 'UNLISTED',
-      ipOwnership: isDirector ? '100% PERMANENT & IRREVOCABLE' : 'LICENSEE ONLY (NO IP RIGHTS)',
-      token: `shaar_user_token_${Date.now()}`,
-    };
-    return res.json({
-      success: true,
-      message: 'Authentication successful.',
-      user,
-      token: user.token,
-    });
-  }
-
-  return res.status(401).json({
-    success: false,
-    message: 'Invalid credentials. Use admin-damoneward38@gmail.com / 313damone for Director Admin access.',
-  });
+  const { email, password } = req.body || {};
+  const adminEmail = getAdminEmail();
+  const adminPassword = process.env.ADMIN_PASSWORD || '';
+  if (!adminEmail || !adminPassword || getAuthSecret().length < 32) return res.status(503).json({ success: false, message: 'Administrator authentication is not configured.' });
+  if (typeof email !== 'string' || typeof password !== 'string' || password.length > 1024) return res.status(400).json({ success: false, message: 'Email and password are required.' });
+  if (email.trim().toLowerCase() !== adminEmail || password !== adminPassword) return res.status(401).json({ success: false, message: 'Invalid credentials.' });
+  const token = issueAdminToken(adminEmail);
+  const user: UserSession = { email: adminEmail, name: 'Director Administrator', role: 'director_admin', clearance: 'LEVEL_V', phone: '', ipOwnership: 'Not asserted by authentication service', token };
+  return res.json({ success: true, message: 'Administrator authenticated.', user, token });
 });
 
 app.get('/api/auth/me', (req: Request, res: Response) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.includes('shaar_sovereign_token_334_damone')) {
-    return res.json({ authenticated: true, user: ADMIN_USER });
-  }
-
-  // Default to Director Admin if requested or return guest
-  return res.json({
-    authenticated: true,
-    user: ADMIN_USER,
-  });
+  const header = req.headers.authorization || '';
+  const admin = header.startsWith('Bearer ') ? readAdminToken(header.slice(7)) : null;
+  if (!admin) return res.status(401).json({ authenticated: false });
+  return res.json({ authenticated: true, user: { email: admin.email, name: 'Director Administrator', role: 'director_admin' } });
 });
 
-// Orders & Checkout
-app.get('/api/orders', (_req: Request, res: Response) => {
-  res.json({ success: true, count: orders.length, orders });
-});
+app.get('/api/orders', requireAdmin, (_req: Request, res: Response) => res.json({ success: true, count: orders.length, orders }));
 
-app.post('/api/checkout', (req: Request, res: Response) => {
-  const {
-    customerEmail,
-    customerName,
-    organization,
-    planId,
-    planName,
-    amount,
-    paymentMethod,
-    phone,
-    billingAddress,
-  } = req.body;
-
-  if (!customerEmail || !planName) {
-    return res.status(400).json({ success: false, message: 'Customer email and plan selection are required.' });
-  }
-
-  const orderNum = Math.floor(1000 + Math.random() * 9000);
-  const licenseHex = Math.random().toString(36).substring(2, 8).toUpperCase();
-  const newOrder = {
-    id: `ORD-SHAAR-33-${orderNum}`,
-    timestamp: new Date().toISOString(),
-    customerEmail: customerEmail || 'admin-damoneward38@gmail.com',
-    customerName: customerName || 'Damone Ward',
-    organization: organization || 'Sovereign Field Operations',
-    planId: planId || 'custom',
-    planName: planName || 'White Label License',
-    amount: Number(amount) || 49997,
-    currency: 'USD',
-    status: 'CONFIRMED' as const,
-    licenseKey: `SHAAR-LIC-${licenseHex}-33N`,
-    paymentMethod: paymentMethod || 'Direct Sovereign Wire',
-    notes: `Provisioned for ${billingAddress?.country || 'USA'} · Field Node 33.4°N`,
-  };
-
-  orders.unshift(newOrder);
-
-  return res.json({
-    success: true,
-    message: 'Checkout completed and license key generated.',
-    order: newOrder,
-    licenseKey: newOrder.licenseKey,
-    ipNotice: 'All underlying patents, frequencies, code, and trade secrets remain 100% the property of Damone Ward.',
-  });
-});
+// Fail closed until checkout uses verified payment processing.
+app.post('/api/checkout', (_req: Request, res: Response) => res.status(503).json({ success: false, message: 'Checkout is unavailable until verified payment processing is configured. No order or license was created.' }));
 
 // Full Pipeline and Button Audit Diagnostics
-app.get('/api/pipeline/audit', (_req: Request, res: Response) => {
+app.get('/api/pipeline/audit', requireAdmin, (_req: Request, res: Response) => {
   const auditResults = {
     timestamp: new Date().toISOString(),
-    status: 'ALL_SYSTEMS_OPERATIONAL',
-    score: '100%',
+    status: 'SOURCE_LEVEL_DIAGNOSTIC_ONLY',
+    score: 'NOT_VERIFIED',
     directorAudit: {
       owner: 'Damone Ward',
       phone: '443-210-6995',
@@ -209,13 +152,13 @@ app.get('/api/pipeline/audit', (_req: Request, res: Response) => {
       credentialsVerified: true,
     },
     subsystems: [
-      { name: 'Express Backend Core', route: '/api/*', status: 'PASSED', latencyMs: 2 },
-      { name: 'Vite React Router Pipeline', routes: ['/', '/map', '/prep', '/frequencies', '/operations', '/buyers', '/checkout', '/login', '/admin'], status: 'PASSED', latencyMs: 1 },
-      { name: '33rd Parallel Coordinate Engine', accuracy: '0.0001°', status: 'PASSED', latencyMs: 3 },
-      { name: 'Web Audio Frequency Synthesizer', carrierHz: [7.83, 111, 285, 396, 432, 528, 963], status: 'PASSED', latencyMs: 2 },
-      { name: 'Checkout & License Provisioning', endToEnd: 'ACTIVE', status: 'PASSED', latencyMs: 4 },
-      { name: 'Authentication & Session Persistence', adminSync: 'READY', status: 'PASSED', latencyMs: 1 },
-      { name: 'Interactive Button Matrix', auditsExecuted: 42, deadButtons: 0, status: 'PASSED' },
+      { name: 'Express Backend Core', route: '/api/*', status: 'NOT_RUNTIME_VERIFIED', latencyMs: 2 },
+      { name: 'Vite React Router Pipeline', routes: ['/', '/map', '/prep', '/frequencies', '/operations', '/buyers', '/checkout', '/login', '/admin'], status: 'NOT_RUNTIME_VERIFIED', latencyMs: 1 },
+      { name: '33rd Parallel Coordinate Engine', accuracy: '0.0001°', status: 'NOT_RUNTIME_VERIFIED', latencyMs: 3 },
+      { name: 'Web Audio Frequency Synthesizer', carrierHz: [7.83, 111, 285, 396, 432, 528, 963], status: 'NOT_RUNTIME_VERIFIED', latencyMs: 2 },
+      { name: 'Checkout & License Provisioning', status: 'DISABLED_UNTIL_PAYMENT_INTEGRATION' },
+      { name: 'Authentication & Session Persistence', status: 'REQUIRES_DEPLOYMENT_SECRETS' },
+      { name: 'Interactive Button Matrix', status: 'NOT_RUNTIME_VERIFIED' },
     ],
   };
 

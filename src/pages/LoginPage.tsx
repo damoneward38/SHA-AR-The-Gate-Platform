@@ -11,8 +11,8 @@ export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, login, logout, isAdmin } = useAuth();
 
-  const [email, setEmail] = useState('admin-damoneward38@gmail.com');
-  const [password, setPassword] = useState('313damone');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -27,7 +27,7 @@ export const LoginPage: React.FC = () => {
     try {
       const res = await login(email, password);
       if (res.success) {
-        setSuccessMessage('Authentication successful. Welcome, Director Damone Ward.');
+        setSuccessMessage('Authentication successful. Welcome.');
         setTimeout(() => {
           navigate('/admin');
         }, 800);
@@ -41,17 +41,6 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const handleQuickDirectorLogin = async () => {
-    setEmail('admin-damoneward38@gmail.com');
-    setPassword('313damone');
-    setIsLoading(true);
-    const res = await login('admin-damoneward38@gmail.com', '313damone');
-    setIsLoading(false);
-    if (res.success) {
-      setSuccessMessage('Logged in with Director Level-V Sovereign Clearance.');
-      setTimeout(() => navigate('/admin'), 600);
-    }
-  };
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 pt-20 pb-16 bg-[radial-gradient(ellipse_at_top,#120822_0%,#000008_70%)] overflow-y-auto custom-scrollbar">
@@ -104,24 +93,6 @@ export const LoginPage: React.FC = () => {
             </div>
           </div>
         )}
-
-        {/* Quick 1-Click Director Button */}
-        <button
-          type="button"
-          onClick={handleQuickDirectorLogin}
-          disabled={isLoading}
-          className="w-full p-3 rounded-2xl bg-gradient-to-r from-[#fbbf24]/20 to-[#a855f7]/20 border border-[#fbbf24]/40 hover:border-[#fbbf24] transition-all text-left group cursor-pointer"
-        >
-          <div className="flex items-center justify-between text-xs font-bold text-[#fbbf24]">
-            <span className="flex items-center gap-1.5">
-              <Sparkles size={14} /> Quick Director Admin Sign-In
-            </span>
-            <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-          </div>
-          <div className="text-[10px] font-mono text-white/60 mt-1">
-            Credentials: admin-damoneward38@gmail.com · 313damone
-          </div>
-        </button>
 
         {/* Login Form */}
         <form onSubmit={handleLoginSubmit} className="space-y-4">
