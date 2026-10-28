@@ -1,4 +1,5 @@
 import { OrderRecord, PipelineAuditReport, UserSession } from '../types';
+import { localAiEngine } from './localAiEngine';
 
 export const api = {
   async getHealth() {
@@ -157,18 +158,41 @@ export const api = {
     message: string;
     history?: Array<{ sender: 'user' | 'ai'; text: string }>;
     clientContext?: Record<string, unknown>;
-  }): Promise<{ success: boolean; reply: string }> {
+    engine?: 'auto' | 'local' | 'gemini';
+  }): Promise<{ success: boolean; reply: string; engineUsed: string; offline: boolean }> {
+    // If user explicitly chose local sovereign model or if device is offline:
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    if (data.engine === 'local' || isOffline) {
+      const localRes = localAiEngine.generateResponse(data.message, data.clientContext);
+      return {
+        success: true,
+        reply: localRes.reply,
+        engineUsed: 'LOCAL_SOVEREIGN_LLAMA_OFFLINE (Zero Tokens)',
+        offline: true,
+      };
+    }
+
     try {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
-      return await res.json();
-    } catch {
+      const json = await res.json();
       return {
         success: true,
-        reply: "SHA'AR Command Center operational (Offline Buffer). Parallel 33.4°N axis locked. How may I assist your frequency protocol?",
+        reply: json.reply,
+        engineUsed: json.engineUsed || 'HYBRID_DUAL_LINK (Gemini / Sovereign)',
+        offline: false,
+      };
+    } catch {
+      // Seamless zero-token local sovereign fallback
+      const localRes = localAiEngine.generateResponse(data.message, data.clientContext);
+      return {
+        success: true,
+        reply: localRes.reply,
+        engineUsed: 'LOCAL_SOVEREIGN_OFFLINE_FALLBACK (Zero Tokens)',
+        offline: true,
       };
     }
   },

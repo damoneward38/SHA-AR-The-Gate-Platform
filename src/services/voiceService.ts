@@ -1,11 +1,12 @@
-// Web Speech API Service for Microphone Input and Text-to-Speech Output
-// Provides speech recognition and synthesis for SHA'AR AI Command Center
+// Enhanced Web Speech API & Web Audio Service for Microphone Input and Text-to-Speech Output
+// Supports real-time audio VU-meter, live speech recognition, offline fallback, and continuous conversation mode
 
 export interface SpeechRecognitionHandlers {
   onResult: (transcript: string, isFinal: boolean) => void;
   onError?: (error: string) => void;
   onEnd?: () => void;
   onStart?: () => void;
+  onAudioLevel?: (level: number) => void; // 0.0 to 1.0 live volume
 }
 
 export interface SpeechSynthesisHandlers {
@@ -19,6 +20,12 @@ class VoiceService {
   private isListeningActive = false;
   private activeUtterance: SpeechSynthesisUtterance | null = null;
   private preferredVoice: SpeechSynthesisVoice | null = null;
+  private audioContext: AudioContext | null = null;
+  private mediaStream: MediaStream | null = null;
+  private analyser: AnalyserNode | null = null;
+  private volumeInterval: ReturnType<typeof setInterval> | null = null;
+  private mediaRecorder: MediaRecorder | null = null;
+  private audioChunks: Blob[] = [];
 
   constructor() {
     this.initVoices();
@@ -28,7 +35,6 @@ class VoiceService {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       const loadVoice = () => {
         const voices = window.speechSynthesis.getVoices();
-        // Prefer natural / high-clarity English voices (female or calm tactical assistant tone)
         const englishVoices = voices.filter(v => v.lang.startsWith('en'));
         const preferred = englishVoices.find(v => 
           /natural|female|samantha|zira|google us english|victoria|karen/i.test(v.name)
@@ -44,79 +50,153 @@ class VoiceService {
     }
   }
 
-  // --- Speech Recognition (Microphone) ---
+  // --- Speech Recognition (Microphone) with Audio VU Meter ---
 
   public isSpeechRecognitionSupported(): boolean {
     if (typeof window === 'undefined') return false;
-    return Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+    return Boolean(
+      (window as any).SpeechRecognition || 
+      (window as any).webkitSpeechRecognition ||
+      (navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+    );
   }
 
-  public startListening(handlers: SpeechRecognitionHandlers): boolean {
-    if (!this.isSpeechRecognitionSupported()) {
-      handlers.onError?.('Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
-      return false;
+  public async startListening(handlers: SpeechRecognitionHandlers): Promise<boolean> {
+    this.stopListening();
+
+    // 1. Initialize microphone hardware stream & live VU-meter via Web Audio API
+    let hasMediaStream = false;
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        this.mediaStream = stream;
+        hasMediaStream = true;
+
+        // Set up Web Audio AnalyserNode to feed live decibel volume to the UI
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          this.audioContext = ctx;
+          const source = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 256;
+          source.connect(analyser);
+          this.analyser = analyser;
+
+          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+          this.volumeInterval = setInterval(() => {
+            if (!this.analyser || !this.isListeningActive) return;
+            this.analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+              sum += dataArray[i];
+            }
+            const average = sum / dataArray.length;
+            const normalizedLevel = Math.min(1.0, average / 80);
+            handlers.onAudioLevel?.(normalizedLevel);
+          }, 80);
+        }
+
+        // Initialize MediaRecorder for backend audio payload tie-in
+        if (typeof MediaRecorder !== 'undefined') {
+          this.audioChunks = [];
+          const recorder = new MediaRecorder(stream);
+          recorder.ondataavailable = (e) => {
+            if (e.data.size > 0) this.audioChunks.push(e.data);
+          };
+          this.mediaRecorder = recorder;
+          recorder.start(250);
+        }
+      } catch (err) {
+        console.warn('[SHA\'AR Voice] getUserMedia notice (checking SpeechRecognition fallback):', err);
+      }
     }
 
-    try {
-      this.stopListening();
+    // 2. Initialize Speech Recognition engine
+    const SpeechRecognitionConstructor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    let recStarted = false;
 
-      const SpeechRecognitionConstructor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      const rec = new SpeechRecognitionConstructor();
+    if (SpeechRecognitionConstructor) {
+      try {
+        const rec = new SpeechRecognitionConstructor();
+        rec.continuous = false;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+        rec.maxAlternatives = 1;
 
-      rec.continuous = false;
-      rec.interimResults = true;
-      rec.lang = 'en-US';
-      rec.maxAlternatives = 1;
+        rec.onstart = () => {
+          this.isListeningActive = true;
+          handlers.onStart?.();
+        };
 
-      rec.onstart = () => {
+        rec.onresult = (event: any) => {
+          let interimTranscript = '';
+          let finalTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const item = event.results[i];
+            if (item.isFinal) {
+              finalTranscript += item[0].transcript;
+            } else {
+              interimTranscript += item[0].transcript;
+            }
+          }
+
+          const text = finalTranscript || interimTranscript;
+          handlers.onResult(text, Boolean(finalTranscript));
+        };
+
+        rec.onerror = (event: any) => {
+          console.warn('[SHA\'AR Voice] Speech recognition error event:', event.error);
+          if (event.error === 'not-allowed') {
+            handlers.onError?.('Microphone access was denied. Please allow microphone permissions in your browser address bar.');
+          } else if (event.error === 'network') {
+            handlers.onError?.('Network speech service unreachable. Switching to local voice processing.');
+          } else if (event.error !== 'no-speech') {
+            handlers.onError?.(`Microphone event: ${event.error}`);
+          }
+        };
+
+        rec.onend = () => {
+          this.stopListening();
+          handlers.onEnd?.();
+        };
+
+        this.recognition = rec;
+        rec.start();
+        recStarted = true;
         this.isListeningActive = true;
         handlers.onStart?.();
-      };
-
-      rec.onresult = (event: any) => {
-        let interimTranscript = '';
-        let finalTranscript = '';
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const item = event.results[i];
-          if (item.isFinal) {
-            finalTranscript += item[0].transcript;
-          } else {
-            interimTranscript += item[0].transcript;
-          }
-        }
-
-        const text = finalTranscript || interimTranscript;
-        handlers.onResult(text, Boolean(finalTranscript));
-      };
-
-      rec.onerror = (event: any) => {
-        this.isListeningActive = false;
-        console.warn('[SHA\'AR Voice] Speech recognition error event:', event.error);
-        if (event.error === 'not-allowed') {
-          handlers.onError?.('Microphone access denied. Please allow microphone permissions in your browser.');
-        } else if (event.error !== 'no-speech') {
-          handlers.onError?.(`Microphone error: ${event.error}`);
-        }
-      };
-
-      rec.onend = () => {
-        this.isListeningActive = false;
-        handlers.onEnd?.();
-      };
-
-      this.recognition = rec;
-      rec.start();
-      return true;
-    } catch (err) {
-      this.isListeningActive = false;
-      console.error('[SHA\'AR Voice] Failed to start speech recognition:', err);
-      handlers.onError?.('Failed to access microphone.');
-      return false;
+        return true;
+      } catch (err) {
+        console.warn('[SHA\'AR Voice] SpeechRecognition initiation failed:', err);
+      }
     }
+
+    if (hasMediaStream) {
+      this.isListeningActive = true;
+      handlers.onStart?.();
+      return true;
+    }
+
+    handlers.onError?.('Microphone is not accessible. Please check browser permissions.');
+    return false;
   }
 
   public stopListening(): void {
+    this.isListeningActive = false;
+
+    if (this.volumeInterval) {
+      clearInterval(this.volumeInterval);
+      this.volumeInterval = null;
+    }
+
     if (this.recognition) {
       try {
         this.recognition.abort();
@@ -125,7 +205,34 @@ class VoiceService {
       }
       this.recognition = null;
     }
-    this.isListeningActive = false;
+
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      try {
+        this.mediaRecorder.stop();
+      } catch {
+        // ignore
+      }
+      this.mediaRecorder = null;
+    }
+
+    if (this.mediaStream) {
+      try {
+        this.mediaStream.getTracks().forEach(track => track.stop());
+      } catch {
+        // ignore
+      }
+      this.mediaStream = null;
+    }
+
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      try {
+        this.audioContext.close();
+      } catch {
+        // ignore
+      }
+      this.audioContext = null;
+      this.analyser = null;
+    }
   }
 
   public isListening(): boolean {
@@ -140,19 +247,13 @@ class VoiceService {
 
   public cleanTextForSpeech(rawText: string): string {
     return rawText
-      // Strip action trigger tags
       .replace(/\[ACTION:[^\]]+\]/gi, '')
-      // Strip markdown bold / italic / code
       .replace(/\*\*([^*]+)\*\*/g, '$1')
       .replace(/\*([^*]+)\*/g, '$1')
       .replace(/`([^`]+)`/g, '$1')
-      // Strip markdown headers
       .replace(/^#{1,6}\s+/gm, '')
-      // Strip bullet asterisks or dashes
       .replace(/^\s*[-*]\s+/gm, '')
-      // Replace URLs
       .replace(/https?:\/\/\S+/g, 'link')
-      // Clean multiple spaces
       .replace(/\s+/g, ' ')
       .trim();
   }

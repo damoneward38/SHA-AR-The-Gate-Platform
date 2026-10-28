@@ -6,13 +6,14 @@ import {
   ShieldAlert, ShieldCheck, Zap, Volume2, VolumeX,
   Compass, ArrowRight, RotateCcw, AlertCircle, CheckCircle2,
   Phone, User, Check, Mic, MicOff, Radio, Headphones,
-  Cpu, Lock, Info, Volume1
+  Cpu, Lock, Info, Volume1, Wifi, WifiOff, Activity
 } from 'lucide-react';
 import { audioEngine } from '../services/audioEngine';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { FREQUENCY_PRESETS } from '../data/constants';
 import { voiceService } from '../services/voiceService';
+import { localAiEngine } from '../services/localAiEngine';
 
 interface ChatMessage {
   id: string;
@@ -20,6 +21,7 @@ interface ChatMessage {
   text: string;
   timestamp: string;
   actionExecuted?: string;
+  engineBadge?: string;
 }
 
 export const CommandCenterPage: React.FC = () => {
@@ -36,9 +38,13 @@ export const CommandCenterPage: React.FC = () => {
   const [autoStartAudio, setAutoStartAudio] = useState<boolean>(true);
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
 
+  // AI Model Engine: Local Sovereign (100% Offline / Zero Tokens / Llama) vs Hybrid Cloud
+  const [selectedEngine, setSelectedEngine] = useState<'local' | 'auto'>('local');
+
   // Voice & Conversation Mode states
   const [isConversationMode, setIsConversationMode] = useState<boolean>(false);
   const [isListening, setIsListening] = useState<boolean>(false);
+  const [audioLevel, setAudioLevel] = useState<number>(0);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
 
@@ -49,8 +55,9 @@ export const CommandCenterPage: React.FC = () => {
     {
       id: 'welcome',
       sender: 'ai',
-      text: `Greetings. I am SHA'AR AI Command Center, your tactical co-pilot and gateway intelligence engine, designed and directed by Damone Ward.\n\nI am fully equipped with two-way voice conversation mode. You can speak to me using your microphone and listen through the speaker in my response boxes. I am synchronized with all 12 parallel 33.4°N gateway coordinates, the 7-Day Body Reset Lab, and the acoustic frequency synthesizer. What protocol would you like to execute?`,
+      text: `Greetings. I am SHA'AR AI Command Center, designed and directed by Damone Ward.\n\nI am operating in LOCAL SOVEREIGN ENGINE MODE (100% Offline / Zero Tokens / Zero API Keys Required). Your microphone is connected directly with real-time audio analysis and message-box speaker playback. I know all 12 parallel 33.4°N gateway coordinates, the 7-Day Body Reset Lab (including Day 5 Fish Bile), and acoustic levitation physics.\n\nYou can speak directly into your microphone, listen to any response, or toggle hands-free Conversation Mode below.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      engineBadge: 'LOCAL_SOVEREIGN_OFFLINE (0 Tokens)',
     },
   ]);
 
@@ -111,6 +118,7 @@ export const CommandCenterPage: React.FC = () => {
       sender: 'ai',
       text: `Session Complete: Your ${activeFreq}Hz acoustic harmonization session has concluded safely. Automatic shutdown triggered. Biofield stability verified.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      engineBadge: 'LOCAL_INTERLOCK_TRIGGER',
     };
     setChatMessages((prev) => [...prev, finishMsg]);
 
@@ -149,54 +157,55 @@ export const CommandCenterPage: React.FC = () => {
     setIsPlayingAudio(false);
   };
 
-  // --- Voice Input (Microphone) & Speech Synthesis (Speaker) ---
+  // --- Voice Input (Microphone) with Real-Time Decibel Meter ---
 
-  const startListening = () => {
-    if (!voiceService.isSpeechRecognitionSupported()) {
-      setVoiceNotice('Microphone speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
-      setTimeout(() => setVoiceNotice(null), 5000);
-      return;
-    }
-
-    // Stop speech synthesis if speaking so mic doesn't capture AI
+  const startListening = async () => {
+    // Stop speech synthesis if currently speaking
     voiceService.stopSpeaking();
     setSpeakingMessageId(null);
 
-    setVoiceNotice('Listening... Speak your command or question.');
-    const started = voiceService.startListening({
+    setVoiceNotice('Microphone connected. Speak clearly into your mic...');
+    const started = await voiceService.startListening({
       onStart: () => {
         setIsListening(true);
+      },
+      onAudioLevel: (level) => {
+        setAudioLevel(level);
       },
       onResult: (text, isFinal) => {
         setInputMessage(text);
         if (isFinal) {
           setIsListening(false);
+          setAudioLevel(0);
           setVoiceNotice(null);
-          // If in conversation mode, auto-submit final speech
-          if (isConversationMode && text.trim()) {
+          if (text.trim()) {
             handleSendMessage(text.trim());
           }
         }
       },
       onError: (err) => {
         setIsListening(false);
+        setAudioLevel(0);
         setVoiceNotice(err);
         setTimeout(() => setVoiceNotice(null), 5000);
       },
       onEnd: () => {
         setIsListening(false);
+        setAudioLevel(0);
         setVoiceNotice(null);
       },
     });
 
     if (!started) {
       setIsListening(false);
+      setAudioLevel(0);
     }
   };
 
   const stopListening = () => {
     voiceService.stopListening();
     setIsListening(false);
+    setAudioLevel(0);
     setVoiceNotice(null);
   };
 
@@ -210,7 +219,6 @@ export const CommandCenterPage: React.FC = () => {
 
   const speakMessage = (id: string, text: string) => {
     if (speakingMessageId === id) {
-      // Toggle off
       voiceService.stopSpeaking();
       setSpeakingMessageId(null);
       return;
@@ -218,6 +226,7 @@ export const CommandCenterPage: React.FC = () => {
 
     voiceService.stopListening();
     setIsListening(false);
+    setAudioLevel(0);
 
     setSpeakingMessageId(id);
     voiceService.speak(text, {
@@ -226,11 +235,10 @@ export const CommandCenterPage: React.FC = () => {
       },
       onEnd: () => {
         setSpeakingMessageId(null);
-        // If in conversation mode, immediately resume listening for user response!
         if (isConversationMode) {
           setTimeout(() => {
             startListening();
-          }, 350);
+          }, 400);
         }
       },
       onError: () => {
@@ -260,7 +268,6 @@ export const CommandCenterPage: React.FC = () => {
     let cleanText = replyText;
     let actionNotice = '';
 
-    // Match [ACTION:SET_SESSION freq=... duration=... label="..." autostart=...]
     const sessionMatch = replyText.match(/\[ACTION:SET_SESSION\s+freq=([\d.]+)\s+duration=(\d+)(?:\s+label="([^"]*)")?(?:\s+autostart=(true|false))?\]/i);
     if (sessionMatch) {
       const freq = parseFloat(sessionMatch[1]);
@@ -280,7 +287,6 @@ export const CommandCenterPage: React.FC = () => {
       cleanText = cleanText.replace(sessionMatch[0], '').trim();
     }
 
-    // Match [ACTION:STOP_AUDIO]
     const stopMatch = replyText.match(/\[ACTION:STOP_AUDIO\]/i);
     if (stopMatch) {
       stopSessionAndAudio();
@@ -288,7 +294,6 @@ export const CommandCenterPage: React.FC = () => {
       cleanText = cleanText.replace(stopMatch[0], '').trim();
     }
 
-    // Match [ACTION:NAVIGATE path="..."]
     const navMatch = replyText.match(/\[ACTION:NAVIGATE\s+path="([^"]+)"\]/i);
     if (navMatch) {
       const targetPath = navMatch[1];
@@ -306,7 +311,6 @@ export const CommandCenterPage: React.FC = () => {
     const text = textToSend || inputMessage;
     if (!text.trim() || isAiLoading) return;
 
-    // Stop microphone if currently listening
     if (isListening) {
       stopListening();
     }
@@ -326,6 +330,7 @@ export const CommandCenterPage: React.FC = () => {
       const res = await api.sendAiChat({
         message: text.trim(),
         history: chatMessages.slice(-6).map((m) => ({ sender: m.sender, text: m.text })),
+        engine: selectedEngine,
         clientContext: {
           currentFreq: activeFreq,
           isPlaying: isPlayingAudio,
@@ -343,33 +348,36 @@ export const CommandCenterPage: React.FC = () => {
         text: cleanText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         actionExecuted: actionNotice || undefined,
+        engineBadge: res.engineUsed || 'LOCAL_SOVEREIGN_ENGINE (Zero Tokens)',
       };
 
       setChatMessages((prev) => [...prev, aiMsg]);
 
-      // If Conversation Mode is enabled, automatically speak the AI response!
       if (isConversationMode) {
         speakMessage(aiMsg.id, aiMsg.text);
       }
     } catch {
-      const fallbackText = "I am actively monitoring the 33.4°N coordinate stream. All acoustic safeguards are active. Damone Ward retains 100% IP ownership permanently.";
+      const localFallback = localAiEngine.generateResponse(text.trim(), { currentFreq: activeFreq });
+      const { cleanText, actionNotice } = processAiActionTags(localFallback.reply);
+
       const fallbackMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'ai',
-        text: fallbackText,
+        text: cleanText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        actionExecuted: actionNotice || undefined,
+        engineBadge: 'LOCAL_SOVEREIGN_OFFLINE (0 Tokens)',
       };
       setChatMessages((prev) => [...prev, fallbackMsg]);
 
       if (isConversationMode) {
-        speakMessage(fallbackMsg.id, fallbackText);
+        speakMessage(fallbackMsg.id, fallbackMsg.text);
       }
     } finally {
       setIsAiLoading(false);
     }
   };
 
-  // Format seconds to MM:SS
   const formatTime = (secs: number) => {
     const mins = Math.floor(secs / 60);
     const remainder = secs % 60;
@@ -389,19 +397,47 @@ export const CommandCenterPage: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-[#10b981] animate-ping" />
-              <span className="text-[10px] font-mono text-[#fbbf24] uppercase font-bold tracking-widest">
-                SHA'AR Co-Pilot · Voice & Autonomous Field Operations
+              <span className="text-[10px] font-mono text-[#fbbf24] uppercase font-bold tracking-widest flex items-center gap-1.5">
+                SHA'AR Co-Pilot · Local Sovereign & Voice Intelligence
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold text-white uppercase tracking-tight text-glow-gold flex items-center gap-2">
               AI Command Center
             </h1>
             <p className="text-xs text-white/50 max-w-xl">
-              Equipped with real-time microphone voice input, speaker playback, and two-way conversation mode. Fully knowledgeable of all 33rd parallel gateway doors, 7-day preparation remedies, and frequency immersion safety rules.
+              Equipped with real-time microphone input, per-box audio speakers, hands-free conversation mode, and local offline reasoning (zero API keys / zero tokens required).
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {/* Model Engine Selector: Local Sovereign vs Hybrid */}
+            <div className="flex items-center bg-black/50 p-1 rounded-xl border border-white/10 text-xs font-mono">
+              <button
+                onClick={() => setSelectedEngine('local')}
+                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer font-bold ${
+                  selectedEngine === 'local'
+                    ? 'bg-[#10b981] text-black shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                    : 'text-white/60 hover:text-white'
+                }`}
+                title="Runs 100% locally on device with zero API keys and zero tokens"
+              >
+                <WifiOff size={13} />
+                <span>Local Llama Engine (Zero Tokens)</span>
+              </button>
+              <button
+                onClick={() => setSelectedEngine('auto')}
+                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer font-bold ${
+                  selectedEngine === 'auto'
+                    ? 'bg-[#fbbf24] text-black shadow-[0_0_15px_rgba(251,191,36,0.4)]'
+                    : 'text-white/60 hover:text-white'
+                }`}
+                title="Uses Cloud Gemini when online, switches to Local Model when offline"
+              >
+                <Wifi size={13} />
+                <span>Hybrid Cloud (Auto)</span>
+              </button>
+            </div>
+
             {/* Conversation Mode Master Toggle Button */}
             <button
               onClick={toggleConversationMode}
@@ -414,42 +450,6 @@ export const CommandCenterPage: React.FC = () => {
             >
               <Headphones size={15} className={isConversationMode ? 'text-black' : 'text-[#fbbf24]'} />
               <span>{isConversationMode ? 'Conversation Mode: ACTIVE' : 'Conversation Mode: OFF'}</span>
-            </button>
-
-            {/* Carrier Telemetry Badge */}
-            <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center gap-3 text-xs font-mono">
-              <div>
-                <div className="text-[9px] text-white/40 uppercase">Carrier Resonance</div>
-                <div className="font-bold text-[#fbbf24]">{activeFreq} Hz</div>
-              </div>
-              <div className="w-px h-6 bg-white/10" />
-              <div>
-                <div className="text-[9px] text-white/40 uppercase">Audio Emission</div>
-                <div className={`font-bold ${isPlayingAudio ? 'text-[#10b981]' : 'text-white/40'}`}>
-                  {isPlayingAudio ? 'ACTIVE' : 'STANDBY'}
-                </div>
-              </div>
-            </div>
-
-            {/* Tone Toggle Button */}
-            <button
-              onClick={() => {
-                if (isPlayingAudio) {
-                  audioEngine.stopTone();
-                  setIsPlayingAudio(false);
-                } else {
-                  audioEngine.playTone(activeFreq, 0, 'sine', 0.16);
-                  setIsPlayingAudio(true);
-                }
-              }}
-              className={`p-2.5 rounded-xl border text-xs font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
-                isPlayingAudio
-                  ? 'bg-red-500/20 text-red-400 border-red-500/40'
-                  : 'bg-[#fbbf24] text-black border-[#fbbf24]'
-              }`}
-            >
-              {isPlayingAudio ? <VolumeX size={15} /> : <Volume2 size={15} />}
-              <span className="hidden sm:inline">{isPlayingAudio ? 'Stop Tone' : 'Start Tone'}</span>
             </button>
           </div>
         </div>
@@ -464,12 +464,10 @@ export const CommandCenterPage: React.FC = () => {
                 <div className="w-6 h-6 rounded-lg bg-[#fbbf24]/20 text-[#fbbf24] flex items-center justify-center font-bold text-xs">
                   AI
                 </div>
-                <span className="text-white/80">SHA'AR Neural Commander v8.0</span>
-                {isConversationMode && (
-                  <span className="text-[10px] bg-[#10b981]/20 text-[#10b981] px-2 py-0.5 rounded border border-[#10b981]/40 flex items-center gap-1">
-                    <Radio size={10} className="animate-spin" /> VOICE CHAT
-                  </span>
-                )}
+                <span className="text-white/80 font-bold">SHA'AR Autonomous Co-Pilot</span>
+                <span className="text-[9px] bg-[#10b981]/10 text-[#10b981] px-2 py-0.5 rounded border border-[#10b981]/30">
+                  {selectedEngine === 'local' ? 'OFFLINE SOVEREIGN ENGINE ACTIVE' : 'HYBRID DUAL-LINK ACTIVE'}
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 {speakingMessageId && (
@@ -477,9 +475,11 @@ export const CommandCenterPage: React.FC = () => {
                     <Volume2 size={10} className="animate-pulse" /> Speaking...
                   </span>
                 )}
-                <span className="text-[10px] text-[#10b981] bg-[#10b981]/10 px-2 py-0.5 rounded border border-[#10b981]/20">
-                  AWARENESS: 100% ONLINE
-                </span>
+                {isListening && (
+                  <span className="text-[10px] text-red-400 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/30 flex items-center gap-1 font-bold animate-pulse">
+                    <Mic size={10} /> MIC RECORDING
+                  </span>
+                )}
               </div>
             </div>
 
@@ -490,10 +490,10 @@ export const CommandCenterPage: React.FC = () => {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="mb-3 px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#06b6d4]/20 to-[#fbbf24]/20 border border-[#06b6d4]/40 text-xs font-mono text-white flex items-center justify-between"
+                  className="mb-3 px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-[#06b6d4]/20 to-[#fbbf24]/20 border border-[#06b6d4]/40 text-xs font-mono text-white flex items-center justify-between"
                 >
                   <div className="flex items-center gap-2">
-                    <Radio size={13} className="text-[#06b6d4] animate-pulse flex-none" />
+                    <Radio size={14} className="text-[#06b6d4] animate-pulse flex-none" />
                     <span>{voiceNotice}</span>
                   </div>
                   <button
@@ -530,6 +530,12 @@ export const CommandCenterPage: React.FC = () => {
                       )}
                       <span>·</span>
                       <span>{msg.timestamp}</span>
+                      {msg.engineBadge && (
+                        <>
+                          <span>·</span>
+                          <span className="text-[#10b981] font-bold">{msg.engineBadge}</span>
+                        </>
+                      )}
                     </div>
 
                     <div
@@ -594,40 +600,72 @@ export const CommandCenterPage: React.FC = () => {
                 <div className="flex flex-col items-start">
                   <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 text-xs text-white/50 flex items-center gap-2 font-mono">
                     <Sparkles size={13} className="text-[#fbbf24] animate-spin" />
-                    <span>Processing field query & synthesizing frequency triggers...</span>
-                  </div>
-                </div>
-              )}
-
-              {isListening && (
-                <div className="flex flex-col items-end">
-                  <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-center gap-2 font-mono animate-pulse">
-                    <Mic size={13} className="text-red-400" />
-                    <span>Microphone active... Speak your query clearly.</span>
+                    <span>Synthesizing tactical response ({selectedEngine === 'local' ? 'Local Sovereign Engine' : 'Dual Link'})...</span>
                   </div>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Quick Suggestion Chips */}
+            {/* Live Audio VU-Meter Waveform Bar (Visible when Microphone is Active) */}
+            <AnimatePresence>
+              {isListening && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mb-3 p-3 rounded-2xl bg-red-950/30 border border-red-500/40 space-y-2"
+                >
+                  <div className="flex items-center justify-between text-[10px] font-mono text-red-400">
+                    <span className="flex items-center gap-1.5 font-bold">
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                      LIVE MICROPHONE AUDIO INPUT · SPEAK NOW
+                    </span>
+                    <span>Level: {Math.round(audioLevel * 100)}%</span>
+                  </div>
+
+                  {/* Dynamic Equalizer Audio Bars */}
+                  <div className="flex items-end gap-1 h-8 w-full bg-black/60 rounded-xl p-1.5 border border-white/5 overflow-hidden">
+                    {Array.from({ length: 32 }).map((_, i) => {
+                      const barHeight = Math.max(
+                        10,
+                        Math.min(100, Math.sin((i / 32) * Math.PI) * (audioLevel * 100 + Math.random() * 20))
+                      );
+                      return (
+                        <div
+                          key={i}
+                          className="flex-1 rounded-sm bg-gradient-to-t from-[#10b981] via-[#fbbf24] to-red-500 transition-all duration-75"
+                          style={{ height: `${barHeight}%` }}
+                        />
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Quick Voice Phrases / Test Triggers */}
             <div className="space-y-1.5 mb-3">
-              <div className="text-[9px] font-mono text-white/40 uppercase">Suggested Inquiries & Commands</div>
+              <div className="flex items-center justify-between text-[9px] font-mono text-white/40 uppercase">
+                <span>Direct Spoken Command Triggers (Click to Voice / Transcribe)</span>
+                <span className="text-[#10b981]">Zero Tokens Needed</span>
+              </div>
               <div className="flex flex-wrap gap-1.5">
                 {[
-                  "How does voice conversation mode work?",
-                  "How long should I run 111Hz safely?",
-                  "Set a 20-minute 7.83Hz Schumann grounding session",
-                  "Guide me through Day 5 Fish Bile cellular reset",
-                  "What are all your functions and capabilities?",
-                  "How do I purchase a White Label license?",
-                ].map((chip, idx) => (
+                  "Start 20-minute 111Hz session",
+                  "Guide approach to Mount Hermon",
+                  "Explain Day 5 Fish Bile cellular reset",
+                  "How long can I run 7.83Hz safely?",
+                  "Who retains 100% IP ownership?",
+                  "Halt all frequency waves",
+                ].map((phrase, idx) => (
                   <button
                     key={idx}
-                    onClick={() => handleSendMessage(chip)}
-                    className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 text-[10px] font-mono text-white/70 hover:text-white transition-colors cursor-pointer text-left"
+                    onClick={() => handleSendMessage(phrase)}
+                    className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 text-[10px] font-mono text-white/70 hover:text-white transition-colors cursor-pointer text-left flex items-center gap-1.5"
                   >
-                    {chip}
+                    <Mic size={10} className="text-[#fbbf24]" />
+                    <span>"{phrase}"</span>
                   </button>
                 ))}
               </div>
@@ -647,10 +685,10 @@ export const CommandCenterPage: React.FC = () => {
                 onClick={toggleMicrophone}
                 className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-center flex-none ${
                   isListening
-                    ? 'bg-red-500 text-white border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.6)] animate-pulse'
+                    ? 'bg-red-500 text-white border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.7)] animate-pulse'
                     : 'bg-white/5 hover:bg-white/10 text-white/70 hover:text-white border-white/10'
                 }`}
-                title={isListening ? "Stop listening" : "Click to speak with microphone"}
+                title={isListening ? "Stop microphone recording" : "Click to speak with microphone"}
               >
                 {isListening ? <MicOff size={16} /> : <Mic size={16} className="text-[#fbbf24]" />}
               </button>
@@ -660,9 +698,9 @@ export const CommandCenterPage: React.FC = () => {
                 type="text"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                placeholder={isListening ? "Listening... Speak now..." : "Ask safety limits, schedule frequency timers, or speak..."}
+                placeholder={isListening ? "Listening to your voice... Speak now..." : "Speak into mic or type frequency commands / safety questions..."}
                 className={`flex-1 px-4 py-3 rounded-2xl bg-black/60 border text-xs text-white placeholder-white/30 focus:outline-none transition-colors ${
-                  isListening ? 'border-red-500/50' : 'border-white/10 focus:border-[#fbbf24]'
+                  isListening ? 'border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'border-white/10 focus:border-[#fbbf24]'
                 }`}
               />
 

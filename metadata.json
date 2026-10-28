@@ -1,7 +1,10 @@
 {
   "name": "SHA'AR — The Gate Platform",
   "description": "Advanced field operations platform for 33rd parallel anomalies, ancient doors, and frequency-based protection protocols.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": [
+    "MICROPHONE",
+    "GEOLOCATION"
+  ],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
