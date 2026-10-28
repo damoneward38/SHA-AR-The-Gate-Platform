@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Map, Shield, ShoppingCart, Radio,
-  Brain, Lock, Cpu, Sparkles, CheckSquare
+  Brain, Lock, Cpu, Sparkles, CheckSquare, Bot
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -10,6 +10,7 @@ export const Sidebar: React.FC = () => {
 
   const menuItems = [
     { label: "Operations", id: "ops", icon: <LayoutDashboard size={15} />, href: "/" },
+    { label: "AI Command Center", id: "ai", icon: <Bot size={15} className="text-[#fbbf24]" />, href: "/command-center", highlight: true },
     { label: "33rd Gate Map", id: "map", icon: <Map size={15} />, href: "/map" },
     { label: "Prep Lab", id: "prep", icon: <Shield size={15} />, href: "/prep" },
     { label: "Mind Frequency", id: "freq", icon: <Brain size={15} />, href: "/frequencies" },
@@ -39,7 +40,12 @@ export const Sidebar: React.FC = () => {
                   {item.icon}
                 </div>
                 <span className="text-xs">{item.label}</span>
-                {isActive && (
+                {item.highlight && (
+                  <span className="px-1.5 py-0.5 rounded text-[8px] font-mono bg-[#fbbf24]/20 text-[#fbbf24] border border-[#fbbf24]/30 font-bold ml-auto">
+                    CO-PILOT
+                  </span>
+                )}
+                {isActive && !item.highlight && (
                   <div className="ml-auto w-1.5 h-1.5 rounded-full bg-[#fbbf24] shadow-[0_0_8px_#fbbf24]" />
                 )}
               </div>

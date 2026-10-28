@@ -20,6 +20,7 @@ import { BuyersPage } from './pages/BuyersPage';
 import { CheckoutPage } from './pages/CheckoutPage';
 import { LoginPage } from './pages/LoginPage';
 import { AdminPage } from './pages/AdminPage';
+import { CommandCenterPage } from './pages/CommandCenterPage';
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
             <div className="flex-1 flex flex-col overflow-hidden relative">
               <Routes>
                 <Route path="/" element={<OperationsPage />} />
+                <Route path="/command-center" element={<CommandCenterPage />} />
                 <Route path="/map" element={<GateMapPage />} />
                 <Route path="/prep" element={<PrepLabPage />} />
                 <Route path="/frequencies" element={<FrequenciesPage />} />

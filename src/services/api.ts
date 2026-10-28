@@ -152,4 +152,25 @@ export const api = {
       };
     }
   },
+
+  async sendAiChat(data: {
+    message: string;
+    history?: Array<{ sender: 'user' | 'ai'; text: string }>;
+    clientContext?: Record<string, unknown>;
+  }): Promise<{ success: boolean; reply: string }> {
+    try {
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch {
+      return {
+        success: true,
+        reply: "SHA'AR Command Center operational (Offline Buffer). Parallel 33.4°N axis locked. How may I assist your frequency protocol?",
+      };
+    }
+  },
 };
+

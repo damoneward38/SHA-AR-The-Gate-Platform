@@ -16,6 +16,7 @@ export const Navbar: React.FC = () => {
 
   const navLinks = [
     { label: "Operations", path: "/" },
+    { label: "AI Command", path: "/command-center" },
     { label: "Gate Map", path: "/map" },
     { label: "Prep Lab", path: "/prep" },
     { label: "Frequencies", path: "/frequencies" },
@@ -134,6 +135,14 @@ export const Navbar: React.FC = () => {
                 </div>
 
                 <div className="py-1">
+                  <Link
+                    to="/command-center"
+                    className="flex items-center gap-2 px-3 py-2 text-xs text-[#fbbf24] hover:bg-[#fbbf24]/10 rounded-lg transition-colors font-medium"
+                  >
+                    <Sparkles size={14} className="text-[#fbbf24]" />
+                    <span>AI Command Center (Co-Pilot)</span>
+                  </Link>
+
                   <Link
                     to="/admin"
                     className="flex items-center gap-2 px-3 py-2 text-xs text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
